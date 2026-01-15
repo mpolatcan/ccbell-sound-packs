@@ -80,9 +80,39 @@ ccbell-sound-packs/
 # 5. Output to packs/my-pack/
 ```
 
-## CI Pipeline
+## Storage Architecture
 
-### Option 1: Claude Code Theme Curation (Recommended)
+We store **only pack.json in git** (metadata). Sound files are stored as **GitHub Release assets**.
+
+```
+Git Repository (small - only text files)
+├── packs/
+│   ├── retro/pack.json        # ✅ Metadata only
+│   ├── minimal/pack.json
+│   └── ...
+└── .github/workflows/
+
+GitHub Releases (binary assets)
+├── retro-v1.0.0.zip           # ✅ Contains pack.json + sounds/*.aiff
+├── minimal-v1.0.0.zip
+└── ...
+```
+
+### Why?
+
+| Aspect | Solution |
+|--------|----------|
+| **Repo size** | Stays small (no binary bloat) |
+| **Version control** | pack.json changes tracked in git |
+| **Fast clone** | Users don't download all sounds |
+| **ccbell reads** | From release assets |
+
+### What ccbell Downloads
+
+When user runs `/ccbell:packs install retro`, ccbell:
+1. Reads release list from GitHub API
+2. Finds retro-v1.0.0.zip asset
+3. Downloads and extracts pack.json + sounds
 
 Use Claude Code AI to search and curate sounds based on a theme:
 
@@ -93,9 +123,9 @@ Use Claude Code AI to search and curate sounds based on a theme:
 3. Enter theme: "retro", "futuristic", "lofi", "nature", etc.
 4. Claude Code will:
    - Search Pixabay for matching sounds
-   - Select best sounds for each event
-   - Create the pack structure
-   - Open a Pull Request
+   - Download and convert to AIFF
+   - Create pack.json
+   - Create GitHub Release with sounds
 ```
 
 **Or via Issue Comment:**
