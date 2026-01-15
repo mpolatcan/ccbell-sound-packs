@@ -82,6 +82,31 @@ ccbell-sound-packs/
 
 ## CI Pipeline
 
+### Option 1: Claude Code Theme Curation (Recommended)
+
+Use Claude Code AI to search and curate sounds based on a theme:
+
+```bash
+# Via GitHub Actions UI
+1. Go to Actions → "Theme Curation with Claude"
+2. Click "Run workflow"
+3. Enter theme: "retro", "futuristic", "lofi", "nature", etc.
+4. Claude Code will:
+   - Search Pixabay for matching sounds
+   - Select best sounds for each event
+   - Create the pack structure
+   - Open a Pull Request
+```
+
+**Or via Issue Comment:**
+```markdown
+!curate retro
+```
+
+Claude will create a PR for the "retro" themed pack!
+
+### Option 2: Simple Scheduled Curation
+
 The `.github/workflows/curate.yml` pipeline:
 
 - **Scheduled**: Runs monthly on the 1st
@@ -94,9 +119,10 @@ Set in repository settings → Secrets:
 
 | Secret | Provider | Get Key At |
 |--------|----------|------------|
+| `ANTHROPIC_API_KEY` | Claude Code | [console.anthropic.com](https://console.anthropic.com/) |
 | `PIXABAY_API_KEY` | Pixabay | [pixabay.com/api/docs](https://pixabay.com/api/docs/) |
 | `FREESOUND_API_KEY` | Freesound | [freesound.org/apiv2/apply](https://freesound.org/apiv2/apply) |
-| `FREESOUND_OAUTH_TOKEN` | Freesound (optional) | For full-quality downloads |
+| `GH_TOKEN` | GitHub | Settings → Personal access tokens (repo scope) |
 
 ## Usage with ccbell
 
