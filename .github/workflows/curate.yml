@@ -1,0 +1,245 @@
+name: Curation Pipeline
+
+on:
+  # Monthly automatic curation
+  schedule:
+    - cron: '0 0 1 * *'  # 1st of each month at midnight UTC
+
+  # Manual trigger with inputs
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'Sound provider to query'
+        required: false
+        default: 'pixabay'
+        type: choice
+        options:
+          - pixabay
+          - freesound
+      pack_name:
+        description: 'Name of the pack to create/update'
+        required: false
+        default: 'minimal'
+      query:
+        description: 'Search query for sounds'
+        required: false
+        default: 'notification bell alert'
+      dry_run:
+        description: 'Run without creating releases'
+        required: false
+        default: 'false'
+        type: boolean
+
+  # Trigger on pushes to main that modify packs
+  push:
+    branches:
+      - main
+    paths:
+      - 'packs/**'
+      - 'scripts/**'
+
+env:
+  # Provider API Keys (set in repository secrets)
+  PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+  FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+  FREESOUND_OAUTH_TOKEN: ${{ secrets.FREESOUND_OAUTH_TOKEN }}
+
+jobs:
+  curate:
+    name: Curation - ${{ github.event.inputs.provider || 'pixabay' }}
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq ffmpeg
+
+      - name: Determine provider
+        id: provider
+        run: |
+          PROVIDER="${{ github.event.inputs.provider || 'pixabay' }}"
+          echo "provider=$PROVIDER" >> $GITHUB_OUTPUT
+
+      - name: Determine pack name and query
+        id: pack
+        run: |
+          PACK_NAME="${{ github.event.inputs.pack_name || 'minimal' }}"
+          QUERY="${{ github.event.inputs.query || 'notification bell alert' }}"
+          echo "name=$PACK_NAME" >> $GITHUB_OUTPUT
+          echo "query=$QUERY" >> $GITHUB_OUTPUT
+
+      - name: Display configuration
+        run: |
+          echo "Provider: ${{ steps.provider.outputs.provider }}"
+          echo "Pack: ${{ steps.pack.outputs.name }}"
+          echo "Query: ${{ steps.pack.outputs.query }}"
+
+      - name: Run curation script
+        id: curate
+        run: |
+          cd ${{ github.workspace }}
+          chmod +x scripts/sound-pack-curator.sh
+          ./scripts/sound-pack-curator.sh curate \
+            "${{ steps.provider.outputs.provider }}" \
+            "${{ steps.pack.outputs.name }}" \
+            "${{ steps.pack.outputs.query }}" \
+            2>&1 | tee /tmp/curation.log
+          cat /tmp/curation.log
+
+      - name: Check if pack was created
+        id: check-pack
+        run: |
+          if [ -d "packs/${{ steps.pack.outputs.name }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            ls -la "packs/${{ steps.pack.outputs.name }}/"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create version tag
+        if: steps.check-pack.outputs.exists == 'true'
+        id: version
+        run: |
+          # Get current date for version
+          VERSION="1.$(date +%Y%m)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Pack created with version: $VERSION"
+
+      - name: Create GitHub Release
+        if: steps.check-pack.outputs.exists == 'true' && github.event_name != 'pull_request'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.version }}-${{ steps.pack.outputs.name }}
+          release_name: ${{ steps.pack.outputs.name }} v${{ steps.version.outputs.version }}
+          body: |
+            Sound pack: ${{ steps.pack.outputs.name }}
+            Version: ${{ steps.version.outputs.version }}
+            Query: ${{ steps.pack.outputs.query }}
+
+            Auto-generated from ${{ steps.provider.outputs.provider }} via CI pipeline.
+          draft: false
+          prerelease: false
+
+      - name: Upload pack assets
+        if: steps.check-pack.outputs.exists == 'true' && github.event_name != 'pull_request'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: packs/${{ steps.pack.outputs.name }}
+          asset_name: ${{ steps.pack.outputs.name }}-${{ steps.version.outputs.version }}.zip
+          asset_content_type: application/zip
+
+      - name: Create ZIP archive for release
+        if: steps.check-pack.outputs.exists == 'true'
+        run: |
+          cd packs/${{ steps.pack.outputs.name }}
+          zip -r ${{ steps.pack.outputs.name }}-${{ steps.version.outputs.version }}.zip .
+
+      - name: Commit pack changes
+        if: steps.check-pack.outputs.exists == 'true' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packs/${{ steps.pack.outputs.name }}/
+          git status
+          git diff --stat
+          git commit -m "Add/update ${{ steps.pack.outputs.name }} pack v${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git push
+
+  dry-run:
+    name: Dry Run - ${{ github.event.inputs.provider || 'pixabay' }}
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.dry_run == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq ffmpeg
+
+      - name: Query sounds (dry run)
+        id: query
+        run: |
+          cd ${{ github.workspace }}
+          chmod +x scripts/sound-pack-curator.sh
+          echo "=== Querying ${{ github.event.inputs.provider || 'pixabay' }} ==="
+          ./scripts/sound-pack-curator.sh query \
+            "${{ github.event.inputs.provider || 'pixabay' }}" \
+            "${{ github.event.inputs.query || 'notification bell alert' }}" \
+            --limit 5
+          echo "=== Query complete (dry run - no downloads) ==="
+
+  validate-packs:
+    name: Validate Packs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate pack structure
+        run: |
+          echo "=== Validating pack structure ==="
+          for pack_dir in packs/*/; do
+            if [ -d "$pack_dir" ]; then
+              pack_name=$(basename "$pack_dir")
+              echo "Checking pack: $pack_name"
+
+              # Check pack.json exists
+              if [ -f "$pack_dir/pack.json" ]; then
+                echo "  ✓ pack.json exists"
+
+                # Validate JSON
+                if jq empty "$pack_dir/pack.json" 2>/dev/null; then
+                  echo "  ✓ Valid JSON"
+
+                  # Check required fields
+                  id=$(jq -r '.id' "$pack_dir/pack.json")
+                  if [ "$id" == "$pack_name" ] || [ "v$id" == "$pack_name" ]; then
+                    echo "  ✓ ID matches"
+                  fi
+
+                  # Check events
+                  events=$(jq -r '.events | keys | length' "$pack_dir/pack.json")
+                  echo "  ✓ $events events configured"
+                else
+                  echo "  ✗ Invalid JSON"
+                  exit 1
+                fi
+              else
+                echo "  ✗ Missing pack.json"
+                exit 1
+              fi
+
+              # Check sounds directory
+              if [ -d "$pack_dir/sounds" ]; then
+                sound_count=$(find "$pack_dir/sounds" -name "*.aiff" | wc -l)
+                echo "  ✓ $sound_count sound files"
+              fi
+            fi
+          done
+          echo "=== Validation complete ==="
+
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [curate, validate-packs]
+    if: failure()
+
+    steps:
+      - name: Send notification
+        run: |
+          echo "Curation pipeline failed!"
+          echo "Check workflow logs at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -1,0 +1,17 @@
+{
+  "id": "minimal",
+  "name": "Minimal",
+  "description": "Clean, subtle notification sounds curated from Pixabay",
+  "author": "ccbell-sound-packs",
+  "version": "1.0.0",
+  "events": {
+    "stop": "stop.aiff",
+    "permission_prompt": "permission_prompt.aiff",
+    "idle_prompt": "idle_prompt.aiff",
+    "subagent": "subagent.aiff"
+  },
+  "source": {
+    "provider": "pixabay",
+    "license": "pixabay"
+  }
+}
