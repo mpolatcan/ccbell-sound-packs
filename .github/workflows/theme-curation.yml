@@ -1,7 +1,7 @@
 name: Theme Curation with Claude
 
-# Trigger manually with a theme input
 on:
+  # Manual trigger with theme input
   workflow_dispatch:
     inputs:
       theme:
@@ -10,22 +10,8 @@ on:
           Claude Code will search and curate sounds matching this theme.
         required: true
         type: string
-      event_sounds:
-        description: |
-          JSON mapping events to sound descriptions.
-          Claude will use this as a guide for each event.
-        required: false
-        type: string
-        default: |
-          {
-            "stop": "completion, done, success sounds",
-            "permission_prompt": "subtle notification, alert sounds",
-            "idle_prompt": "waiting, timer, pause sounds",
-            "subagent": "agent complete, task done sounds"
-          }
 
-# Also respond to issue comments like "!curate retro"
-on:
+  # Trigger via issue comment: "!curate retro"
   issue_comment:
     types: [created]
 
@@ -33,43 +19,37 @@ env:
   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
 jobs:
-  # Job 1: Claude Code curates sounds based on theme
-  curate-sounds:
-    name: Curate "${{ github.event.inputs.theme || 'retro' }}" Theme
+  curate-pack:
+    name: Curate "${{ steps.theme.outputs.value }}" Theme
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && starts_with(github.event.comment.body, '!curate'))
 
     steps:
+      # 1. Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_TOKEN }}
 
-      - name: Parse theme from comment
-        if: github.event_name == 'issue_comment'
-        id: parse-comment
+      # 2. Parse theme from input or comment
+      - name: Parse theme
+        id: theme
         run: |
-          THEME=$(echo "${{ github.event.comment.body }}" | sed 's/!curate *//' | tr -d ' ')
-          echo "theme=$THEME" >> $GITHUB_OUTPUT
-          echo "Extracted theme: $THEME"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            THEME="${{ github.event.inputs.theme }}"
+          else
+            THEME=$(echo "${{ github.event.comment.body }}" | sed 's/!curate *//' | tr -d ' ')
+          fi
+          echo "value=$THEME" >> $GITHUB_OUTPUT
+          echo "Theme: $THEME"
 
-      - name: Set theme and event mappings
-        id: config
+      # 3. Install dependencies
+      - name: Set up dependencies
         run: |
-          THEME="${{ github.event.inputs.theme || steps.parse-comment.outputs.theme }}"
-          EVENTS="${{ github.event.inputs.event_sounds }}"
-          echo "theme=$THEME" >> $GITHUB_OUTPUT
-          echo "events=$EVENTS" >> $GITHUB_OUTPUT
+          sudo apt-get update
+          sudo apt-get install -y curl jq ffmpeg
 
-      - name: Display curation configuration
-        run: |
-          echo "========================================"
-          echo "Theme: ${{ steps.config.outputs.theme }}"
-          echo "Events:"
-          echo "${{ steps.config.outputs.events }}"
-          echo "========================================"
-
-      # Claude Code Action to search and select sounds
+      # 4. Claude Code creates the ENTIRE pack
       - name: Claude Code Curation
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -77,195 +57,174 @@ jobs:
           prompt: |
             You are a sound curator for ccbell notification plugin.
 
-            THEME: ${{ steps.config.outputs.theme }}
-
-            EVENT SOUNDS TO FIND:
-            ${{ steps.config.outputs.events }}
-
             YOUR TASK:
-            1. Search Pixabay (https://pixabay.com/api/) for sounds matching the theme for each event
-            2. For each event, find the best matching sound
-            3. Create a shell script that:
-               - Downloads each sound from Pixabay
-               - Converts to AIFF format (ffmpeg)
-               - Creates pack.json with proper event mappings
+            Create a complete sound pack for theme: "${{ steps.theme.outputs.value }}"
 
-            OUTPUT INSTRUCTIONS:
-            - Output ONLY a shell script to /tmp/curate.sh
-            - The script should create the pack in packs/$THEME/
-            - Include proper error handling
-            - Use jq for JSON parsing
-            - Use ffmpeg for format conversion
-            - Download to temporary directory, clean up after
+            STEPS:
+            1. Create directory: packs/${{ steps.theme.outputs.value }}/sounds/
+            2. Search Pixabay API for sounds matching the theme for each event:
+               - stop: completion, done, success sounds
+               - permission_prompt: subtle notification, alert sounds
+               - idle_prompt: waiting, timer, pause sounds
+               - subagent: agent complete, task done sounds
+            3. For each event, download the best matching sound to packs/${{ steps.theme.outputs.value }}/sounds/
+            4. Convert each sound to AIFF format (ffmpeg -i input.aiff -f aiff output.aiff)
+            5. Create packs/${{ steps.theme.outputs.value }}/pack.json with proper structure:
 
-            Example structure:
-            ```bash
-            #!/bin/bash
-            set -e
-
-            THEME="${{ steps.config.outputs.theme }}"
-            mkdir -p "packs/$THEME/sounds"
-
-            # Download and convert each sound
-            curl -s "https://pixabay.com/api/?q=$THEME+notification&key=PIXABAY_API_KEY" | \
-              jq -r '.hits[0].audio' | head -1 | xargs -I {} curl -L -o "packs/$THEME/sounds/stop.aiff" {}
-
-            # Convert to AIFF
-            ffmpeg -i "packs/$THEME/sounds/stop.aiff" -f aiff "packs/$THEME/sounds/stop.aiff"
-
-            # Create pack.json
-            cat > "packs/$THEME/pack.json" <<EOF
+            ```json
             {
-              "id": "$THEME",
-              "name": "$(echo $THEME | sed 's/-/ /g')",
-              "description": "Sounds curated by Claude Code for theme: $THEME",
+              "id": "${{ steps.theme.outputs.value }}",
+              "name": "Theme Name (capitalized)",
+              "description": "Description of the theme",
+              "author": "claude-code",
               "version": "1.0.0",
               "events": {
                 "stop": "stop.aiff",
                 "permission_prompt": "permission_prompt.aiff",
                 "idle_prompt": "idle_prompt.aiff",
                 "subagent": "subagent.aiff"
-              }
+              },
+              "source": "pixabay",
+              "license": "pixabay"
             }
-            EOF
             ```
 
-            Create this script at /tmp/curate.sh and make it executable.
-            Do NOT output anything else - just create the script.
+            REQUIREMENTS:
+            - Use Pixabay API: https://pixabay.com/api/?q={query}&category=sound-effects&per_page=5
+            - Convert all sounds to AIFF (macOS compatible)
+            - Use event-specific search queries
+            - Clean up any MP3/WAV files after conversion
+            - Create proper pack.json with all metadata
 
-      - name: Display Claude's output
-        if: always()
-        run: |
-          if [ -f /tmp/curate.sh ]; then
-            echo "=== Claude generated script ==="
-            head -50 /tmp/curate.sh
-            echo "..."
-          else
-            echo "No script generated"
-          fi
+            OUTPUT:
+            - Create the complete pack structure at: packs/${{ steps.theme.outputs.value }}/
+            - List what you created: ls -la packs/${{ steps.theme.outputs.value }}/
+            - Show the pack.json content
+            - Tell the user the pack is ready for PR
 
-      - name: Run curation script
-        if: always()
-        run: |
-          if [ -f /tmp/curate.sh ]; then
-            chmod +x /tmp/curate.sh
-            /tmp/curate.sh 2>&1 || echo "Script execution completed with status: $?"
-          fi
+            Do NOT output a shell script. Do the work DIRECTLY in the filesystem.
 
-      - name: Check if pack was created
-        id: check-pack
+      # 5. Verify pack was created
+      - name: Verify pack
+        id: verify
         run: |
-          THEME="${{ steps.config.outputs.theme }}"
-          if [ -d "packs/$THEME" ] && [ -f "packs/$THEME/pack.json" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Pack created successfully!"
+          THEME="${{ steps.theme.outputs.value }}"
+          echo "Verifying pack for theme: $THEME"
+
+          if [ -d "packs/$THEME" ]; then
+            echo "Pack directory exists"
             ls -la "packs/$THEME/"
-            cat "packs/$THEME/pack.json"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Pack creation may have failed or theme was not found"
 
-      # Create PR if pack was created
+            if [ -f "packs/$THEME/pack.json" ]; then
+              echo "pack.json found:"
+              cat "packs/$THEME/pack.json"
+            else
+              echo "ERROR: pack.json not found"
+              exit 1
+            fi
+
+            sound_count=$(find "packs/$THEME/sounds" -name "*.aiff" | wc -l)
+            echo "Sounds created: $sound_count"
+
+            if [ "$sound_count" -lt 1 ]; then
+              echo "ERROR: No sound files found"
+              exit 1
+            fi
+          else
+            echo "ERROR: Pack directory not created"
+            exit 1
+          fi
+
+      # 6. Create Pull Request
       - name: Create Pull Request
-        if: steps.check-pack.outputs.exists == 'true'
+        id: pr
         uses: peter-evans/create-pull-request@v3
         with:
           token: ${{ secrets.GH_TOKEN }}
-          commit-message: "Add ${{ steps.config.outputs.theme }} themed sound pack"
-          title: "Add ${{ steps.config.outputs.theme }} themed sound pack"
+          commit-message: "Add ${{ steps.theme.outputs.value }} themed sound pack"
+          title: "Add ${{ steps.theme.outputs.value }} themed sound pack"
           body: |
             ## Summary
-            Sound pack curated by Claude Code for theme: **${{ steps.config.outputs.theme }}**
+            Sound pack curated by Claude Code for theme: **${{ steps.theme.outputs.value }}**
 
             ## How It Was Curated
-            1. Theme: `${{ steps.config.outputs.theme }}`
+            1. Theme: `${{ steps.theme.outputs.value }}`
             2. Claude Code searched Pixabay for matching sounds
-            3. Selected best sounds for each event type
-            4. Created pack structure
+            3. Claude Code downloaded and converted sounds to AIFF
+            4. Claude Code created pack structure with metadata
 
             ## Events Included
-            - stop
-            - permission_prompt
-            - idle_prompt
-            - subagent
+            - [ ] stop
+            - [ ] permission_prompt
+            - [ ] idle_prompt
+            - [ ] subagent
 
             ## To Use
             ```bash
-            /ccbell:packs install ${{ steps.config.outputs.theme }}
-            /ccbell:packs use ${{ steps.config.outputs.theme }}
+            /ccbell:packs install ${{ steps.theme.outputs.value }}
+            /ccbell:packs use ${{ steps.theme.outputs.value }}
             ```
 
-            ## Notes
+            ## Review Notes
             - Sounds sourced from Pixabay (Pixabay License)
             - Converted to AIFF for macOS compatibility
-            - Review and adjust sounds as needed before merging
-          branch: "curated/${{ steps.config.outputs.theme }}"
+            - Review sounds and adjust as needed before merging
+          branch: "curated/${{ steps.theme.outputs.value }}"
 
-      - name: Comment on issue/PR
+      # 7. Comment on issue/PR
+      - name: Comment on result
         if: always()
         uses: actions/github-script@v6
         with:
           script: |
-            const theme = "${{ steps.config.outputs.theme }}";
-            const exists = "${{ steps.check-pack.outputs.exists }}";
-            const prUrl = "https://github.com/${{ github.repository }}/pull/" + (process.env.PR_NUMBER || "NEW");
+            const theme = "${{ steps.theme.outputs.value }}";
+            const success = "${{ job.status }}" === "success";
+
+            // Get PR number if created
+            const prNumber = process.env.PR_NUMBER || "a new PR";
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## Curation Complete for "${theme}"
+              body: `## 🎵 Curation Complete for "${theme}"
 
-              Theme: ${theme}
-              Status: ${exists === 'true' ? '✅ Pack created!' : '❌ Pack creation failed'}
+              Theme: \`${theme}\`
+              Status: ${success ? '✅ Success!' : '❌ Failed'}
 
-              ${exists === 'true'
-                ? `A pull request has been created with the curated pack. Review and merge to publish!`
-                : `Claude Code couldn't find suitable sounds for this theme. Try a different theme or refine the search.`}
+              ${success
+                ? `Claude Code has created a sound pack for the "${theme}" theme.
+
+                  📦 Pack includes:
+                  - pack.json with full metadata
+                  - AIFF sounds for all events
+                  - Ready for review and merge!
+
+                  🔗 Review here: https://github.com/${{ github.repository }}/pull/${prNumber}`
+                : `Claude Code couldn't create the pack. Check the workflow logs for details.`}
             `});
 
-  # Job 2: Alternative - Use simple API calls (fallback)
-  simple-curate:
-    name: Simple Curation (No Claude)
+  # Job: Simple fallback without Claude (manual curation)
+  manual-curate:
+    name: Manual Pack Creation
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.event.inputs.theme }}
-      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl jq ffmpeg
-
-      - name: Simple Pixabay query
-        id: query
-        run: |
-          THEME="${{ github.event.inputs.theme }}"
-          echo "Querying Pixabay for: $THEME"
-
-          # Search Pixabay
-          curl -s "https://pixabay.com/api/?q=$THEME+notification&category=sound-effects&per_page=10" \
-            | jq -r '.hits[] | "\(.id)|\(.tags)|\(.audio // \"none\")"' \
-            | head -20
-
-      - name: Create simple pack
+      - name: Create placeholder pack
         run: |
           THEME="${{ github.event.inputs.theme }}"
           mkdir -p "packs/$THEME/sounds"
 
-          # Create minimal pack.json
           cat > "packs/$THEME/pack.json" <<EOF
 {
   "id": "$THEME",
   "name": "$(echo $THEME | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++)sub(/./,toupper(substr($i,1,1)),$i)}1')",
   "description": "Sound pack for theme: $THEME",
   "version": "1.0.0",
-  "author": "ccbell-sound-packs",
-  "source": "pixabay",
+  "author": "manual",
   "events": {
     "stop": "stop.aiff",
     "permission_prompt": "permission_prompt.aiff",
@@ -275,24 +234,11 @@ jobs:
 }
 EOF
 
-          echo "Created pack.json"
-          cat "packs/$THEME/pack.json"
+          echo "Created placeholder pack - add sounds manually"
 
-      - name: Create Pull Request
+      - name: Create PR
         uses: peter-evans/create-pull-request@v3
         with:
           token: ${{ secrets.GH_TOKEN }}
-          commit-message: "Add ${{ github.event.inputs.theme }} themed pack"
           title: "Add ${{ github.event.inputs.theme }} themed pack"
-          body: |
-            ## Summary
-            Simple sound pack for theme: **${{ github.event.inputs.theme }}**
-
-            ## Note
-            This pack was created via simple API query. Consider running the Claude Code curation for better results.
-
-            ## To Use
-            ```bash
-            /ccbell:packs install ${{ github.event.inputs.theme }}
-            ```
-          branch: "curated/${{ github.event.inputs.theme }}"
+          body: "Placeholder pack - add sounds manually"
