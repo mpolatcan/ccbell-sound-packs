@@ -42,43 +42,27 @@ ccbell-sound-packs/
 
 ## Creating a New Pack
 
-### Option 1: Manual (Recommended for small packs)
+#### Via Issue Comment (Recommended)
 
-1. Create directory: `packs/my-pack/`
-2. Add sounds to `packs/my-pack/sounds/`
-3. Create `packs/my-pack/pack.json`:
-
-```json
-{
-  "id": "my-pack",
-  "name": "My Pack",
-  "description": "Description of your pack",
-  "author": "yourname",
-  "version": "1.0.0",
-  "events": {
-    "stop": "stop.aiff",
-    "permission_prompt": "permission.aiff",
-    "idle_prompt": "idle.aiff",
-    "subagent": "subagent.aiff"
-  }
-}
+Comment on any issue:
+```markdown
+!curate retro
 ```
 
-4. Submit PR
+Claude Code will:
+1. Search Pixabay for retro-themed sounds
+2. Download and convert to AIFF
+3. Create pack.json with metadata
+4. Create GitHub Release with sounds
+5. Commit pack.json to git
+6. Comment with the result
 
-### Option 2: Use Curation Script
+#### Via GitHub Actions UI
 
-```bash
-# Query and create pack
-./scripts/sound-pack-curator.sh curate pixabay my-pack "notification bell"
-
-# The script will:
-# 1. Query Pixabay for sounds
-# 2. Download matching sounds
-# 3. Convert to AIFF format
-# 4. Create pack.json
-# 5. Output to packs/my-pack/
-```
+1. Go to Actions → "Theme Curation with Claude"
+2. Click "Run workflow"
+3. Enter theme: "retro", "futuristic", "lofi", "nature", etc.
+4. Claude Code does the rest!
 
 ## Storage Architecture
 
@@ -113,35 +97,6 @@ When user runs `/ccbell:packs install retro`, ccbell:
 1. Reads release list from GitHub API
 2. Finds retro-v1.0.0.zip asset
 3. Downloads and extracts pack.json + sounds
-
-Use Claude Code AI to search and curate sounds based on a theme:
-
-```bash
-# Via GitHub Actions UI
-1. Go to Actions → "Theme Curation with Claude"
-2. Click "Run workflow"
-3. Enter theme: "retro", "futuristic", "lofi", "nature", etc.
-4. Claude Code will:
-   - Search Pixabay for matching sounds
-   - Download and convert to AIFF
-   - Create pack.json
-   - Create GitHub Release with sounds
-```
-
-**Or via Issue Comment:**
-```markdown
-!curate retro
-```
-
-Claude will create a PR for the "retro" themed pack!
-
-### Option 2: Simple Scheduled Curation
-
-The `.github/workflows/curate.yml` pipeline:
-
-- **Scheduled**: Runs monthly on the 1st
-- **Manual**: Trigger via GitHub Actions UI
-- **Auto-publish**: Creates GitHub releases automatically
 
 ### Required Secrets
 
